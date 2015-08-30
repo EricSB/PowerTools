@@ -70,7 +70,7 @@ function Get-ServiceEXEPerms {
         foreach ($service in $services){
             try{
                 # strip out any arguments and get just the executable
-                $path = ($service.pathname.Substring(0, $service.pathname.IndexOf(".exe") + 4)).Replace('"',"")
+                $path = ($service.pathname.Substring(0, $service.pathname.toLower().IndexOf(".exe") + 4)).Replace('"',"")
 
                 # exclude these two false-positive binaries
                 if ($(Test-Path $path) -and $(-not $path.Contains("NisSrv.exe")) -and $(-not $path.Contains("MsMpEng.exe"))) {
@@ -578,7 +578,7 @@ function Write-CMDServiceBinary {
     try {
         # write the binary array out to the specified path
         Set-Content -value $Binary -encoding byte -path $Path
-        "[*] Binary for service '$ServiceName' with cusotm command '$CMD' written to '$Path'"
+        "[*] Binary for service '$ServiceName' with custom command '$CMD' written to '$Path'"
     }
     catch {
         Write-Warning "Error while writing to location '$Path': $_"
@@ -1778,237 +1778,6 @@ function Get-ApplicationHost
 }
 
 
-function Get-NetGroup {
-    <#
-        .SYNOPSIS
-        Gets a list of all current users in a specified domain group.
-
-        .DESCRIPTION
-        This function users [ADSI] and LDAP to query the current AD context
-        or trusted domain for users in a specified group. If no GroupName is
-        specified, it defaults to querying the "Domain Admins" group.
-        This is a replacement for "net group 'name' /domain"
-
-        .PARAMETER GroupName
-        The group name to query for users. If not given, it defaults to "Domain Admins"
-
-        .PARAMETER Domain
-        The domain to query for group users.
-
-        .EXAMPLE
-        > Get-NetGroup
-        Returns the usernames that of members of the "Domain Admins" domain group.
-
-        .LINK
-        http://www.powershellmagazine.com/2013/05/23/pstip-retrieve-group-membership-of-an-active-directory-group-recursively/
-    #>
-
-    [CmdletBinding()]
-    Param(
-        [string]
-        $GroupName = 'Domain Admins',
-
-        [string]
-        $Domain
-    )
-
-
-    function Get-NetDomainControllers {
-
-        [CmdletBinding()]
-        Param(
-            [string]
-            $Domain
-        )
-
-        # if a domain is specified, try to grab that domain
-        if ($Domain){
-            try{
-                # try to create the context for the target domain
-                $DomainContext = New-Object System.DirectoryServices.ActiveDirectory.DirectoryContext('Domain', $Domain)
-                [System.DirectoryServices.ActiveDirectory.Domain]::GetDomain($DomainContext).DomainControllers
-            }
-            catch{
-                Write-Warning "The specified domain $Domain does not exist, could not be contacted, or there isn't an existing trust."
-                $null
-            }
-        }
-        else{
-            # otherwise, grab the current domain
-            [DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().DomainControllers
-        }
-    }
-
-    # if a domain is specified, try to grab that domain
-    if ($Domain){
-
-        # try to grab the primary DC for the current domain
-        try{
-            $PrimaryDC = ([Array](Get-NetDomainControllers))[0].Name
-        }
-        catch{
-            $PrimaryDC = $Null
-        }
-
-        try {
-            # reference - http://blogs.msdn.com/b/javaller/archive/2013/07/29/searching-across-active-directory-domains-in-powershell.aspx
-
-            $dn = "DC=$($Domain.Replace('.', ',DC='))"
-
-            # if we could grab the primary DC for the current domain, use that for the query
-            if($PrimaryDC){
-                $GroupSearcher = New-Object System.DirectoryServices.DirectorySearcher([ADSI]"LDAP://$PrimaryDC/$dn")
-            }
-            else{
-                # otherwise try to connect to the DC for the target domain
-                $GroupSearcher = New-Object System.DirectoryServices.DirectorySearcher([ADSI]"LDAP://$dn")
-            }
-            # samAccountType=805306368 indicates user objects
-            $GroupSearcher.filter = "(&(objectClass=group)(name=$GroupName))"
-        }
-        catch{
-            Write-Warning "The specified domain $Domain does not exist, could not be contacted, or there isn't an existing trust."
-        }
-    }
-    else{
-        # otherwise, use the current domain
-        $GroupSearcher = [adsisearcher]"(&(objectClass=group)(name=$GroupName))"
-    }
-
-    if ($GroupSearcher){
-        # return full data objects
-        if ($FullData) {
-            if($PrimaryDC){
-                $GroupSearcher.FindOne().properties['member'] | ForEach-Object {
-                    # for each user/member, do a quick adsi object grab
-                    ([adsi]"LDAP://$PrimaryDC/$_").Properties
-                }
-            }
-            else{
-                $GroupSearcher.FindOne().properties['member'] | ForEach-Object {
-                    # for each user/member, do a quick adsi object grab
-                    ([adsi]"LDAP://$_").Properties
-                }
-            }
-        }
-        else{
-            if($PrimaryDC){
-                $GroupSearcher.FindOne().properties['member'] | ForEach-Object {
-                    ([adsi]"LDAP://$PrimaryDC/$_").SamAccountName
-                }
-            }
-            else{
-                $GroupSearcher.FindOne().properties['member'] | ForEach-Object {
-                    ([adsi]"LDAP://$_").SamAccountName
-                }
-            }
-        }
-    }
-}
-
-
-function Invoke-CheckLocalAdmin {
-    <#
-        .SYNOPSIS
-        Checks if the current user is effectively a local admin privileges on the machine.
-
-        .DESCRIPTION
-        This function enumerates all members of the local Administrators group.
-        It checks if the current user is present, and then checks if the user
-        is a member of any returned local or domain group.
-        
-        If this is true and the process is currently medium integrity, the
-        BypassUAC attack can be used to elevate privileges.
-    #>
-
-    [CmdletBinding()]
-    Param()
-
-    $IsLocalAdmin = $false
-
-    $hostname = hostname
-
-    # get the name, SID, and domain of the current user
-    $obj = [System.Security.Principal.WindowsIdentity]::GetCurrent()
-    $CurrentUserName = $obj.Name
-    $CurrentUserSID = $obj.User.Value
-    try{
-        $CurrentUserDomain = ((([adsi]'').distinguishedname -replace 'DC=','' -replace ',','.')[0]).ToLower()
-    }
-    catch {
-        $CurrentUserDomain = $Null
-    }
-
-    # resolve the SID for the local admin group - this should usually default to "Administrators"
-    $objSID = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
-    $objgroup = $objSID.Translate( [System.Security.Principal.NTAccount])
-    $GroupName = ($objgroup.Value).Split('\')[1]
-
-    try{
-        # enumerate all members of the local administrators group and check
-        #   if the user is a member of the specified groups
-        @($([ADSI]"WinNT://$hostname/$groupname").psbase.Invoke('Members')) | ForEach-Object {
-
-            # get the name of the object
-            $name =  ( $_.GetType().InvokeMember('Adspath', 'GetProperty', $null, $_, $null)).Replace('WinNT://', '').Replace("/","\").Replace("WORKGROUP\","")
-
-            # check if this object is the current user
-            if($name.ToLower() -eq $CurrentUserName.ToLower()){
-                $IsLocalAdmin = $True
-                Write-Verbose "[+] User $CurrentUser is in the local administrators group!"
-            }
-
-            # check if this object is local or a part of the domain
-            $Domain = -not $(($_.GetType().InvokeMember('Adspath', 'GetProperty', $null, $_, $null)).Replace('WinNT://', '')-like "*/$hostname/*")
-
-            # check if the object is a group
-            $IsGroup = ($_.GetType().InvokeMember('Class', 'GetProperty', $Null, $_, $Null) -eq 'group')
-
-            if($IsGroup){
-                if($Domain -and $CurrentUserDomain){
-
-                    $GroupDomain = $name.split("\")[0]
-                    $GroupName = $name.split("\")[1]
-
-                    # resolve the netbiod domain name to a FQDN
-                    $DomainFQDN = [System.Net.Dns]::GetHostByName($GroupDomain).Hostname.ToLower()
-
-                    # make sure we get a domain back and the current user is a part of it
-                    if(($DomainFQDN) -and ($CurrentUserDomain -eq $DomainFQDN)){
-                        # if the current user is a part of this group, flag
-                        $GroupUsers = $(Get-NetGroup -GroupName $GroupName -Domain $DomainFQDN)
-                        if ($GroupUsers -contains ($CurrentUserName.split("\")[1])) {
-                            $IsLocalAdmin = $True
-                            Write-Verbose "[+] User $CurrentUser is in the domain group `"$name`"!"
-                        }
-                    }
-                }
-                else{
-                    $GroupName = $name.split("\")[1]
-                    # otherwise we have a local group, so restart the enumeration
-                    @($([ADSI]"WinNT://$hostname/$GroupName").psbase.Invoke('Members')) | ForEach-Object {
-
-                        $name =  ( $_.GetType().InvokeMember('Adspath', 'GetProperty', $null, $_, $null)).Replace('WinNT://', '').Replace("/","\")
-
-                        # check if this object is the current user
-                        if($name -eq $CurrentUserName){
-                            $IsLocalAdmin = $True
-                            Write-Verbose "[+] User $CurrentUser is in the local group `"$name`"!"
-                        }
-                    }
-                }
-            }
-        }
-    }
-    catch {
-        # Write-Warning "[!] Error: $_"
-    }
-
-    $IsLocalAdmin
-}
-
-
-
 function Invoke-AllChecks {
     <#
     .SYNOPSIS
@@ -2034,10 +1803,9 @@ function Invoke-AllChecks {
     }
     else{
         "`n`n[*] Checking if user is in a local group with administrative privileges..."
-        if(Invoke-CheckLocalAdmin){
+        if( ($(whoami /groups) -like "*S-1-5-32-544*").length -eq 1 ){
             "[+] User is in a local group that grants administrative privileges!"
             "[*] Run a BypassUAC attack to elevate privileges to admin."
-            "[*] Run 'Invoke-CheckLocalAdmin -Verbose' to determine exact membership."
         }
     }
 
@@ -2083,8 +1851,11 @@ function Invoke-AllChecks {
     "`n`n[*] Checking %PATH% for potentially hijackable .dll locations..."
     $HijackablePaths = Invoke-FindPathHijack
     if ($HijackablePaths){
-        foreach ($Path in $HijackablePaths){
-            "[+] Hijackable .dll path: $Path"
+        if($HijackablePaths) {
+            "[*] Write a .dll to 'PATH\wlbsctrl.dll' to abuse`n"
+            foreach ($Path in $HijackablePaths){
+                "[+] Hijackable .dll path: $Path"
+            }
         }
     }
 

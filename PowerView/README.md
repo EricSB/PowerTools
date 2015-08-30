@@ -76,6 +76,7 @@ Thanks to:
     Get-NetSessions                 -   gets active sessions on a specified server
     Get-NetFileSessions             -   returned combined Get-NetSessions and Get-NetFiles
     Get-NetConnections              -   gets active connections to a specific server resource (share)
+    Get-NetRDPSessions              -   gets active RDP sessions for a specified server (like qwinsta)
     Get-NetFiles                    -   gets open files on a server
     Get-NetProcesses                -   gets the remote processes and owners on a remote server
 
@@ -102,6 +103,14 @@ Thanks to:
     Invoke-FindUserTrustGroups      -   enumerates users who are in groups outside of their principal domain
     Invoke-FindAllUserTrustGroups   -   map all domain trusts and enumerate all users who are in groups outside 
                                         of their principal domain
+    Invoke-FindGroupTrustUsers      -   enumerates all the members of a domain's groups and finds users that 
+                                        are outside of the queried domain
+    Invoke-FindAllGroupTrustUsers   -   map all domain trusts and enumerate groups with users outside 
+                                        of their principal domain
+    Invoke-EnumerateLocalTrustGroups-   enumerates members of the local Administrators groups across all 
+                                        machines in the domain that are not a part of the local machine 
+                                        or the machine's domain.
+    Invoke-EnumerateLocalTrustGroupsThreaded- threaded version of Invoke-EnumerateLocalTrustGroups
     Invoke-MapDomainTrusts          -   try to build a relational mapping of all domain trusts
     Invoke-MapDomainTrustsLDAP      -   try to build a relational mapping of all domain trusts using
                                         Get-NetDomainTrustsLDAP
@@ -123,6 +132,7 @@ Thanks to:
     Invoke-UserFieldSearch          -   searches a user field for a particular term
     Invoke-ComputerFieldSearch      -   searches a computer field for a particular term
     Get-ExploitableSystems          -   finds systems likely vulnerable to common exploits
+    Get-LAPSPasswords               -   get the LAPS password for each computer account
     Invoke-HostEnum                 -   run all available enumeration checks on a single host
     Invoke-EnumerateLocalAdmins     -   enumerates members of the local Administrators groups across all
                                         machines in the domain
